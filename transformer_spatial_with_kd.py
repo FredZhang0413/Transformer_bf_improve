@@ -17,19 +17,23 @@ mse_loss_fn = nn.MSELoss()
 
 ## wmmse: 52.07755418089099；ZF: 43.94968651013214 (16*16 Gaussian channel)
 
-##### 1. already tried and failed
-### consider learning rate scheduler (done)
-### consider using the hybrid-supervision training strategy (done)
+##### 1. already tried
+### consider learning rate scheduler (works)
 ### consider hard switch learning policy (done)
-### consider curriculum learning strategy (uncertain)
+### consider subspace curriculum learning strategy (uncertain)
 ### consider increasing the episode length T (10-15)
+### consider using the objective CL (works)
+### T = 1, try no L2O (it works when objective CL is used)
+### consider remove the weight decay in optimizer (slight improve?)
+### consider tweaking the MLP modules (slight improve, without layernorm)
 
 
 ##### 2. waiting for the trial
 ### consider the contrastive learning (improtant!)
-### consider tweaking the MLP modules
-### consider remove the weight decay in optimizer
-### T = 1, try no L2O (it works!)
+### self attention vs cross attention (important)
+### consider using the hybrid-supervision training strategy
+
+
 ### select the optimal transformer block number and head number (ongoing)
 ### Do attentions within H, W and HW
 ### gradient clipping?
@@ -378,7 +382,7 @@ def train_beamforming_transformer(config):
     Args:
         config: An instance of BeamformerTransformerConfig with model and training parameters.
     """
-    dataset = ChannelDataset(num_samples=1000 * config.batch_size,
+    dataset = ChannelDataset(num_samples=10000 * config.batch_size,
                              num_users=config.num_users,
                              num_tx=config.num_tx,
                              P=config.SNR_power,
@@ -391,13 +395,14 @@ def train_beamforming_transformer(config):
 
     # Create the learning rate scheduler that linearly decays LR from 1e-4 to 1e-5 over max_epoch epochs
     scheduler = th.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda epoch: 1 - 0.9 * (epoch / config.max_epoch)
+        optimizer, lambda epoch: 1 - 0.5 * (epoch / config.max_epoch)
     )
     
     global mmse_rate_printed
     mmse_rate_printed = False
     model.train()
-    teacher_weight = 1
+    # teacher_weight = 1
+    teacher_weight = 0
 
     rate_history = []
     
@@ -406,12 +411,12 @@ def train_beamforming_transformer(config):
         # # smooth switching
         # teacher_weight = max(teacher_weight - 0.02,0)
 
-        ## hard switching
+        ## hard switching (works better)
         if epoch < 2:
             teacher_weight = 1
         else:
             # teacher_weight = 0
-            teacher_weight = 0.05
+            teacher_weight = 0.0
 
         epoch_loss = 0
         epoch_rate = 0
@@ -424,14 +429,15 @@ def train_beamforming_transformer(config):
             # Convert H to complex format: (B, num_users, num_tx)
             H_mat = H_tensor[:, 0, :, :] + 1j * H_tensor[:, 1, :, :]
             
-            # Compute initial beamformer using MMSE (for initialization)
-            W0, _ = compute_mmse_beamformer(H_mat, config.num_users, config.num_tx,
-                                            config.SNR_power, config.sigma2, device)
+            ## Compute initial beamformer using MMSE (for initialization)
+            W0, _ = compute_mmse_beamformer(H_mat, config.num_users, config.num_tx, config.SNR_power, config.sigma2, device)
             W0 = W0.transpose(-1, -2).to(device) # (B, num_tx, num_users)
-            # Vectorize beamformer: separate real and imaginary parts
-            vec_w0 = th.cat((th.real(W0).reshape(-1, config.num_tx * config.num_users),
-                             th.imag(W0).reshape(-1, config.num_tx * config.num_users)), dim=-1)
+            vec_w0 = th.cat((th.real(W0).reshape(-1, config.num_tx * config.num_users), th.imag(W0).reshape(-1, config.num_tx * config.num_users)), dim=-1)
             vec_w0 = vec_w0.reshape(-1, 2 * config.num_tx * config.num_users)
+
+            # ## Compute initial beamformer randomly
+            # vec_w0 = th.randn(batch_size, 2 * config.num_tx * config.num_users).to(device)
+
             norm_W0 = th.norm(vec_w0, dim=1, keepdim=True)
             normlized_W0 = vec_w0 / norm_W0 # (B, beam_dim)
             # Reconstruct complex beamformer from normalized vector
@@ -529,22 +535,44 @@ class BeamformerTransformerConfig:
 
 
 if __name__ == "__main__":
+    # # Set all parameters in the main function
+    # num_users = 16
+    # num_tx = 16
+    # d_model = 256 # Transformer single-token dimension
+    # beam_dim = 2*num_tx*num_users # Beamformer vector dimension
+    # n_head = 8 # Number of attention heads
+    # n_layers = 6 # Number of transformer layers
+    # T = 1 # Number of time steps
+    # batch_size = 256 
+    # learning_rate = 5e-5
+    # weight_decay = 0.1
+    # max_epoch = 30
+    # sigma2 = 1.0  
+    # SNR = 15
+    # SNR_power = 10 ** (SNR/10) # SNR power in dB
+    # attn_pdrop = 0.05
+    # # resid_pdrop = 0.05
+    # # attn_pdrop = 0.0
+    # resid_pdrop = 0.0
+    # mlp_ratio = 4
+    # subspace_dim = 4
+
     # Set all parameters in the main function
-    num_users = 16
-    num_tx = 16
-    d_model = 256 # Transformer single-token dimension
+    num_users = 4
+    num_tx = 4
+    d_model = 64 # Transformer single-token dimension
     beam_dim = 2*num_tx*num_users # Beamformer vector dimension
-    n_head = 8 # Number of attention heads
-    n_layers = 6 # Number of transformer layers
+    n_head = 4 # Number of attention heads
+    n_layers = 4 # Number of transformer layers
     T = 1 # Number of time steps
-    batch_size = 256 
-    learning_rate = 5e-5
-    weight_decay = 0
-    max_epoch = 30
+    batch_size = 128 
+    learning_rate = 1e-4
+    weight_decay = 0.1
+    max_epoch = 10
     sigma2 = 1.0  
     SNR = 15
     SNR_power = 10 ** (SNR/10) # SNR power in dB
-    attn_pdrop = 0.05
+    attn_pdrop = 0.0
     # resid_pdrop = 0.05
     # attn_pdrop = 0.0
     resid_pdrop = 0.0
@@ -574,12 +602,3 @@ if __name__ == "__main__":
     
     # Train the model with the given config
     train_beamforming_transformer(config)
-
-### consider learning rate scheduler
-### consider using the hybrid-supervision training strategy
-### consider curriculum learning strategy
-### consider different transformer block number and head number
-### consider increasing the episode length T (10-15)
-### consider noise injection
-### consider the learning rate warm-up at the early stage
-### consider random initialization of the beamformer
