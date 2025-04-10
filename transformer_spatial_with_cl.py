@@ -55,12 +55,38 @@ class CrossAttentionBlock(nn.Module):
         # LayerNorm and MLP sublayer (similar to standard Transformer blocks)
         self.ln1 = nn.LayerNorm(d_model)
         self.ln2 = nn.LayerNorm(d_model)
+
+        # ### scheme 1
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(d_model, 4 * d_model),
+        #     nn.GELU(),
+        #     nn.Linear(4 * d_model, d_model),
+        #     nn.Dropout(resid_pdrop),
+        # )
+        ### scheme 2 (better)
         self.mlp = nn.Sequential(
             nn.Linear(d_model, 4 * d_model),
             nn.GELU(),
+            nn.Dropout(resid_pdrop),
+            nn.Linear(4 * d_model, 4 * d_model),  # Additional layer
+            nn.GELU(),
+            nn.Dropout(resid_pdrop),
             nn.Linear(4 * d_model, d_model),
             nn.Dropout(resid_pdrop),
         )
+        # ### scheme 3 (bad, should not add LayerNorm here)
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(d_model, 4 * d_model),
+        #     nn.LayerNorm(4 * d_model),
+        #     nn.GELU(),
+        #     nn.Dropout(resid_pdrop),
+        #     nn.Linear(4 * d_model, 4 * d_model),  # Additional layer
+        #     nn.LayerNorm(4 * d_model),
+        #     nn.GELU(),
+        #     nn.Dropout(resid_pdrop),
+        #     nn.Linear(4 * d_model, d_model),
+        #     nn.Dropout(resid_pdrop),
+        # )
     
     def forward(self, query, kv):
         """
@@ -357,7 +383,7 @@ def train_beamforming_transformer(config):
         # current_subspace_dim = initial_subspace_dim + epoch * cl_increment
         current_subspace_dim = min(initial_subspace_dim + epoch * cl_increment, 2*config.num_users * config.num_tx)
         print(f"Current subspace dimension: {current_subspace_dim}")
-        dataset = ChannelDataset(num_samples=3000*config.batch_size, 
+        dataset = ChannelDataset(num_samples=1000*config.batch_size, 
                                  num_users=config.num_users, 
                                  num_tx=config.num_tx, 
                                  P=config.SNR_power, 
@@ -439,7 +465,6 @@ class BeamformerTransformerConfig:
         self.beam_dim = kwargs['beam_dim']  # Beamformer dimension
         self.n_head = kwargs['n_head'] # Number of attention heads
         self.n_layers = kwargs['n_layers'] # Number of transformer layers
-        self.max_seq_length = kwargs['max_seq_length'] # Maximum sequence length
         self.batch_size = kwargs['batch_size']
         self.learning_rate = kwargs['learning_rate']
         self.weight_decay = kwargs['weight_decay']
@@ -464,8 +489,7 @@ if __name__ == "__main__":
     beam_dim = 2*num_tx*num_users # Beamformer vector dimension
     n_head = 8 # Number of attention heads
     n_layers = 6 # Number of transformer layers
-    T = 10 # Number of time steps
-    max_seq_length = T+1 # Maximum sequence length (episodes of L2O)
+    T = 1 # Number of time steps
     batch_size = 256 
     learning_rate = 5e-5
     weight_decay = 0.1
@@ -474,7 +498,7 @@ if __name__ == "__main__":
     SNR = 15
     SNR_power = 10 ** (SNR/10) # SNR power in dB
     attn_pdrop = 0.05
-    resid_pdrop = 0.05
+    resid_pdrop = 0.0
     mlp_ratio = 4
     subspace_dim = 4 ## only test when subspace dim is fixed
     ini_sub_dim = 2
@@ -487,7 +511,6 @@ if __name__ == "__main__":
         beam_dim=beam_dim,
         n_head=n_head,
         n_layers=n_layers,
-        max_seq_length=max_seq_length,
         batch_size=batch_size,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
