@@ -539,7 +539,7 @@ if __name__ == "__main__":
     T = 1 # Number of time steps
     batch_size = 256 
     learning_rate = 5e-5
-    weight_decay = 0.1
+    weight_decay = 0
     max_epoch = 30
     sigma2 = 1.0  
     SNR = 15
